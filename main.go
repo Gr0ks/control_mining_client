@@ -2,24 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
 type Config struct {
 	Miner  map[string]map[string]*Miner `json:"miner"`
 	Listen string                       `json:"listen"`
-}
-
-type Server struct {
-	Config *Config
 }
 
 func getInts(s string) []int64 {
@@ -46,19 +40,31 @@ func LoadConfigFile() (*Config, error) {
 	return &cfg, nil
 }
 
-func setHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Cache-Control", "no-cache")
-}
+const (
+	tcpProtocol = "tcp"
+)
 
-func (srv *Server) MinersHandler(w http.ResponseWriter, r *http.Request) {
-	setHeaders(w)
-	w.WriteHeader(http.StatusOK)
-	err := json.NewEncoder(w).Encode(srv.Config.Miner)
+var connectAddr = &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8989}
+
+func sendKey(cfg *Config) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:8989"))
 	if err != nil {
-		log.Println("Error serializing /miner: ", err)
+		log.Panic(err)
+		return
 	}
+	defer func() {
+		fmt.Println("Closing connection...")
+		conn.Close()
+	}()
+	log.Println("Connect to ", conn.RemoteAddr)
+	message, err := json.Marshal(cfg)
+	if err != nil {
+		log.Panic(err)
+		return
+	}
+	text := string(message)
+	fmt.Fprintf(conn, text+"\n")
+
 }
 
 func main() {
@@ -67,46 +73,36 @@ func main() {
 		log.Panic(err)
 		return
 	}
+	//log.Println(cfg)
+	//cfg.Miner содержит инфу о майнере
+	//cfg.Server - сервер сборщик статистики
 
-	server := Server{}
-	server.Config = cfg
-
-	r := mux.NewRouter()
-
-	r.HandleFunc("/miner", server.MinersHandler)
-
-	go func() {
-		l, err := net.Listen("tcp", server.Config.Listen)
-		if err != nil {
-			log.Panic(err)
-		} else {
-			if err := http.Serve(l, r); err != nil {
-				log.Panic(err)
-			}
-		}
-	}()
-
-	if err != nil {
-		log.Panic(err)
-		return
-	}
-
+	stop := make(chan bool)
 	intv := time.Duration(time.Second * 10)
 	timer := time.NewTimer(intv)
-	for _, miner := range cfg.Miner {
-		for _, worker := range miner {
+	var miner map[string]*Miner
+	var worker *Miner
+	for _, miner = range cfg.Miner {
+		for _, worker = range miner {
 			go worker.GetStatus()
+
 		}
 	}
+
 	for {
 		select {
 		case <-timer.C:
-			for _, miner := range cfg.Miner {
-				for _, worker := range miner {
+			for _, miner = range cfg.Miner {
+				for _, worker = range miner {
 					go worker.GetStatus()
+					sendKey(cfg)
+					log.Println("Send: ", worker.Status)
+
 				}
 			}
 			timer.Reset(intv)
 		}
 	}
+
+	stop <- true
 }

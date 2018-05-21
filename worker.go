@@ -46,8 +46,9 @@ func (miner *Miner) GetStatus() {
 	}
 	if !miner.Online {
 		log.Printf("%s %s connected", miner.Name, miner.Addr)
+		miner.Online = true
 	}
-	miner.Online = true
+
 	text := `{"id":0,"jsonrpc":"2.0","method":"miner_getstat1"}`
 	fmt.Fprintf(conn, text+"\n")
 	message, _ := bufio.NewReader(conn).ReadString('\n')
@@ -91,4 +92,5 @@ func (miner *Miner) GetStatus() {
 		miner.Status = &stat
 	}
 	conn.Close()
+
 }
